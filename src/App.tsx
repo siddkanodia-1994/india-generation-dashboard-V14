@@ -6,7 +6,6 @@ import {
   Legend,
   Line,
   LineChart,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -55,7 +54,12 @@ function parseInputDate(s: unknown) {
     const [dd, mm, yyyy] = t.split("-").map(Number);
     const d = new Date(Date.UTC(yyyy, mm - 1, dd));
     if (Number.isNaN(d.getTime())) return null;
-    if (d.getUTCFullYear() !== yyyy || d.getUTCMonth() !== mm - 1 || d.getUTCDate() !== dd) return null;
+    if (
+      d.getUTCFullYear() !== yyyy ||
+      d.getUTCMonth() !== mm - 1 ||
+      d.getUTCDate() !== dd
+    )
+      return null;
     return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
   }
 
@@ -120,7 +124,7 @@ function asFiniteNumber(v: unknown): number | null {
 // ----------------------
 
 function monthKey(isoDate: string) {
-  return isoDate.slice(0, 7);
+  return isoDate.slice(0, 7); // YYYY-MM
 }
 
 function addMonths(ym: string, delta: number) {
@@ -219,7 +223,11 @@ function computeKPIs(sortedDaily: DailyPoint[]) {
     const d = Number(iso.slice(8, 10));
 
     const tryDt = new Date(Date.UTC(y + deltaYears, m - 1, d));
-    if (tryDt.getUTCFullYear() === y + deltaYears && tryDt.getUTCMonth() === m - 1 && tryDt.getUTCDate() === d) {
+    if (
+      tryDt.getUTCFullYear() === y + deltaYears &&
+      tryDt.getUTCMonth() === m - 1 &&
+      tryDt.getUTCDate() === d
+    ) {
       return tryDt.toISOString().slice(0, 10);
     }
 
@@ -229,9 +237,11 @@ function computeKPIs(sortedDaily: DailyPoint[]) {
 
   const sumAndCountInclusive = (startIso: string, endIso: string) => {
     if (startIso > endIso) return { sum: null as number | null, count: 0 };
+
     let sum = 0;
     let count = 0;
     let cur = startIso;
+
     while (cur <= endIso) {
       const v = dailyLookup.get(cur);
       if (v != null) {
@@ -240,6 +250,7 @@ function computeKPIs(sortedDaily: DailyPoint[]) {
       }
       cur = isoPlusDays(cur, 1);
     }
+
     return { sum: count ? sum : null, count };
   };
 
@@ -287,20 +298,35 @@ function computeKPIs(sortedDaily: DailyPoint[]) {
   const mtdAvgPY = mtdPY.sum != null && mtdPY.count ? mtdPY.sum / mtdPY.count : null;
   const mtdYoY = mtdAvg != null && mtdAvgPY != null ? growthPct(mtdAvg, mtdAvgPY) : null;
 
-  return { latest, latestYoY, avg7, avg7YoY, avg30, avg30YoY, ytdTotal, ytdYoY, mtdAvg, mtdYoY };
+  return {
+    latest,
+    latestYoY,
+    avg7,
+    avg7YoY,
+    avg30,
+    avg30YoY,
+    ytdTotal,
+    ytdYoY,
+    mtdAvg,
+    mtdYoY,
+  };
 }
 
 function buildMonthDayMap(sortedDaily: DailyPoint[]) {
   const map = new Map<string, { total: number; maxDay: number; byDay: Map<number, number> }>();
+
   for (const d of sortedDaily) {
     const m = monthKey(d.date);
     const day = Number(d.date.slice(8, 10));
+
     if (!map.has(m)) map.set(m, { total: 0, maxDay: 0, byDay: new Map() });
+
     const rec = map.get(m)!;
     rec.total += d.generation_gwh;
     rec.maxDay = Math.max(rec.maxDay, day);
     rec.byDay.set(day, (rec.byDay.get(day) || 0) + d.generation_gwh);
   }
+
   return map;
 }
 
@@ -392,11 +418,16 @@ function csvParse(text: string) {
 }
 
 function sampleCSV() {
-  return ["date,generation_gwh", "18-12-2025,4140", "19-12-2025,4215", "20-12-2025,4198"].join("\n");
+  return [
+    "date,generation_gwh",
+    "18-12-2025,4140",
+    "19-12-2025,4215",
+    "20-12-2025,4198",
+  ].join("\n");
 }
 
 // ----------------------
-// Minimal dev self-tests
+// Minimal self-tests (dev only)
 // ----------------------
 
 function runDevSelfTests() {
@@ -410,7 +441,7 @@ function runDevSelfTests() {
 }
 
 // ----------------------
-// Small UI components
+// UI components
 // ----------------------
 
 function Card({
@@ -464,7 +495,8 @@ function EmptyState({ onLoadSample }: { onLoadSample: () => void }) {
       <div className="mx-auto max-w-xl">
         <div className="text-lg font-semibold text-slate-900">No data yet</div>
         <div className="mt-2 text-sm text-slate-600">
-          Add your first daily datapoint (units/MU) or import a CSV.
+          Add your first daily datapoint (units/MU) or import a CSV. The dashboard will compute monthly totals, YoY%, and
+          MoM%.
         </div>
         <div className="mt-5 flex flex-wrap justify-center gap-3">
           <button
@@ -516,6 +548,7 @@ export default function App() {
   const [msg, setMsg] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [rangeDays, setRangeDays] = useState(120);
+  const [fetchStatus, setFetchStatus] = useState<string | null>(null);
 
   const [fromIso, setFromIso] = useState("");
   const [toIso, setToIso] = useState("");
@@ -547,9 +580,6 @@ export default function App() {
     if (!toIso) setToIso(lastIso);
     if (!fromIso) setFromIso(isoMinusDays(lastIso, clamp(rangeDays, 7, 3650)));
   }, [sortedDaily, toIso, fromIso, rangeDays]);
-
-  const anyTotalsShown = showUnitsSeries || showPrevYearSeries;
-  const anyPctShown = showYoYSeries || showMoMSeries;
 
   const dailyForChart = useMemo<DailyChartPoint[]>(() => {
     if (!sortedDaily.length) return [];
@@ -610,6 +640,7 @@ export default function App() {
     if (aggFreq === "rolling30") {
       const points: DailyChartPoint[] = [];
       let cur = f;
+
       while (cur <= t) {
         const start = isoMinusDays(cur, 29);
         const currSum = sumRangeInclusive(start, cur);
@@ -628,6 +659,7 @@ export default function App() {
 
         cur = isoPlusDays(cur, 1);
       }
+
       return points;
     }
 
@@ -733,30 +765,26 @@ export default function App() {
     });
   }, [sortedDaily, rangeDays, fromIso, toIso, aggFreq]);
 
-  // Round values to 2 dp for visual display on chart labels/ticks.
-  const dailyForChartRounded = useMemo(() => {
-    return dailyForChart.map((p) => ({
-      ...p,
-      units: Number(p.units.toFixed(2)),
-      prev_year_units: p.prev_year_units != null ? Number(p.prev_year_units.toFixed(2)) : null,
-      yoy_pct: p.yoy_pct != null ? Number(p.yoy_pct.toFixed(2)) : null,
-      mom_pct: p.mom_pct != null ? Number(p.mom_pct.toFixed(2)) : null,
-    }));
-  }, [dailyForChart]);
+  // ----------------------
+  // Control line stats (FIXED: computed BEFORE anyTotalsShown uses it)
+  // ----------------------
 
-  // Control lines (left axis: totals; right axis: YoY%)
-  const controlLeft = useMemo(() => {
+  const controlStatsLeft = useMemo(() => {
     if (!showControlLines) return null;
-    if (!dailyForChartRounded.length) return null;
+    if (!dailyForChart.length) return null;
 
     const values: number[] = [];
 
-    // Use whichever totals are visible; prefer current totals if checked.
+    // Prefer Total Current; if hidden, fall back to Total Previous Year.
     if (showUnitsSeries) {
-      for (const p of dailyForChartRounded) values.push(p.units);
+      for (const p of dailyForChart) {
+        const n = asFiniteNumber(p.units);
+        if (n != null) values.push(n);
+      }
     } else if (showPrevYearSeries) {
-      for (const p of dailyForChartRounded) {
-        if (p.prev_year_units != null) values.push(p.prev_year_units);
+      for (const p of dailyForChart) {
+        const n = asFiniteNumber(p.prev_year_units);
+        if (n != null) values.push(n);
       }
     } else {
       return null;
@@ -769,22 +797,23 @@ export default function App() {
     const sd = Math.sqrt(variance);
 
     return {
-      mean: Number(mean.toFixed(2)),
-      p1: Number((mean + sd).toFixed(2)),
-      p2: Number((mean + 2 * sd).toFixed(2)),
-      m1: Number((mean - sd).toFixed(2)),
-      m2: Number((mean - 2 * sd).toFixed(2)),
+      mean,
+      p1: mean + sd,
+      p2: mean + 2 * sd,
+      m1: mean - sd,
+      m2: mean - 2 * sd,
     };
-  }, [showControlLines, dailyForChartRounded, showUnitsSeries, showPrevYearSeries]);
+  }, [showControlLines, dailyForChart, showUnitsSeries, showPrevYearSeries]);
 
-  const controlYoY = useMemo(() => {
+  const controlStatsYoY = useMemo(() => {
     if (!showControlLines) return null;
-    if (!dailyForChartRounded.length) return null;
+    if (!dailyForChart.length) return null;
     if (!showYoYSeries) return null;
 
     const values: number[] = [];
-    for (const p of dailyForChartRounded) {
-      if (p.yoy_pct != null) values.push(p.yoy_pct);
+    for (const p of dailyForChart) {
+      const n = asFiniteNumber(p.yoy_pct);
+      if (n != null) values.push(n);
     }
 
     if (values.length < 2) return null;
@@ -794,13 +823,45 @@ export default function App() {
     const sd = Math.sqrt(variance);
 
     return {
-      mean: Number(mean.toFixed(2)),
-      p1: Number((mean + sd).toFixed(2)),
-      p2: Number((mean + 2 * sd).toFixed(2)),
-      m1: Number((mean - sd).toFixed(2)),
-      m2: Number((mean - 2 * sd).toFixed(2)),
+      mean,
+      p1: mean + sd,
+      p2: mean + 2 * sd,
+      m1: mean - sd,
+      m2: mean - 2 * sd,
     };
-  }, [showControlLines, dailyForChartRounded, showYoYSeries]);
+  }, [showControlLines, dailyForChart, showYoYSeries]);
+
+  // Attach control-line flat fields + round all visible numbers to 2dp for chart rendering
+  const dailyForChartWithControl = useMemo(() => {
+    const base = dailyForChart.map((p) => ({
+      ...p,
+      units: p.units != null ? Number(p.units.toFixed(2)) : p.units,
+      prev_year_units: p.prev_year_units != null ? Number(p.prev_year_units.toFixed(2)) : p.prev_year_units,
+      yoy_pct: p.yoy_pct != null ? Number(p.yoy_pct.toFixed(2)) : p.yoy_pct,
+      mom_pct: p.mom_pct != null ? Number(p.mom_pct.toFixed(2)) : p.mom_pct,
+    }));
+
+    if (!controlStatsLeft && !controlStatsYoY) return base as any;
+
+    return base.map((p) => ({
+      ...p,
+      __mean_units: controlStatsLeft ? Number(controlStatsLeft.mean.toFixed(2)) : null,
+      __p1_units: controlStatsLeft ? Number(controlStatsLeft.p1.toFixed(2)) : null,
+      __p2_units: controlStatsLeft ? Number(controlStatsLeft.p2.toFixed(2)) : null,
+      __m1_units: controlStatsLeft ? Number(controlStatsLeft.m1.toFixed(2)) : null,
+      __m2_units: controlStatsLeft ? Number(controlStatsLeft.m2.toFixed(2)) : null,
+
+      __mean_yoy: controlStatsYoY ? Number(controlStatsYoY.mean.toFixed(2)) : null,
+      __p1_yoy: controlStatsYoY ? Number(controlStatsYoY.p1.toFixed(2)) : null,
+      __p2_yoy: controlStatsYoY ? Number(controlStatsYoY.p2.toFixed(2)) : null,
+      __m1_yoy: controlStatsYoY ? Number(controlStatsYoY.m1.toFixed(2)) : null,
+      __m2_yoy: controlStatsYoY ? Number(controlStatsYoY.m2.toFixed(2)) : null,
+    }));
+  }, [dailyForChart, controlStatsLeft, controlStatsYoY]);
+
+  // Now safe to compute these (controlStatsLeft is defined already)
+  const anyTotalsShown = showUnitsSeries || showPrevYearSeries || (showControlLines && !!controlStatsLeft);
+  const anyPctShown = showYoYSeries || showMoMSeries || (showControlLines && !!controlStatsYoY);
 
   const monthly = useMemo(() => toMonthly(sortedDaily), [sortedDaily]);
 
@@ -866,6 +927,7 @@ export default function App() {
       const { parsed, errors: errs } = csvParse(text);
 
       if (errs.length) setErrors(errs.slice(0, 12));
+
       if (!parsed.length) {
         setErrors((e) => (e.length ? e : ["No valid rows found in CSV."]));
         return;
@@ -892,6 +954,39 @@ export default function App() {
     setMsg("Loaded sample data.");
   }
 
+  async function fetchLatestFromCEA() {
+    setFetchStatus(null);
+
+    const t = new Date();
+    const dd = String(t.getDate()).padStart(2, "0");
+    const mm = String(t.getMonth() + 1).padStart(2, "0");
+    const yyyy = t.getFullYear();
+    const ddmmyyyy = `${dd}-${mm}-${yyyy}`;
+
+    setFetchStatus(`Fetching for ${ddmmyyyy}...`);
+
+    try {
+      const res = await fetch(`/api/cea/daily?date=${encodeURIComponent(ddmmyyyy)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const j = await res.json();
+
+      const iso = parseInputDate(j?.date);
+      const total = Number(j?.total_mu);
+      if (!iso) throw new Error("Bad date");
+      if (!Number.isFinite(total) || total < 0) throw new Error("Bad total_mu");
+
+      setDataMap((prev) => {
+        const next = new Map(prev);
+        next.set(iso, total);
+        return next;
+      });
+
+      setFetchStatus(`Fetched & saved ${j.date}: ${fmtNum(total)} units (incl. RE)`);
+    } catch {
+      setFetchStatus("Auto-fetch failed (backend not deployed / source changed).");
+    }
+  }
+
   const hasData = sortedDaily.length > 0;
 
   return (
@@ -911,6 +1006,12 @@ export default function App() {
               className="rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
             >
               Download sample CSV
+            </button>
+            <button
+              onClick={fetchLatestFromCEA}
+              className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              Auto-fetch latest (incl. RE)
             </button>
             <button
               onClick={exportCSV}
@@ -979,6 +1080,12 @@ export default function App() {
                 </div>
               ) : null}
 
+              {fetchStatus ? (
+                <div className="mt-2 rounded-xl bg-slate-900/5 p-3 text-sm text-slate-800 ring-1 ring-slate-200">
+                  {fetchStatus}
+                </div>
+              ) : null}
+
               {errors.length ? (
                 <div className="mt-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-800 ring-1 ring-rose-200">
                   <div className="font-semibold">Import / input issues</div>
@@ -1002,28 +1109,23 @@ export default function App() {
                   value={kpis.latest ? formatDDMMYYYY(kpis.latest.date) : "—"}
                   sub={kpis.latest ? `${fmtNum(kpis.latest.generation_gwh)} units` : null}
                 />
-
                 <Stat label="Latest YoY (same day)" value={fmtPct(kpis.latestYoY, 2)} sub="vs same date last year (if available)" />
-
                 <Stat
                   label="Current 7-Day Average Units"
                   value={kpis.avg7 != null ? `${fmtNum(kpis.avg7)} units` : "—"}
                   sub={kpis.avg7YoY != null ? `${fmtPct(kpis.avg7YoY, 2)} YoY` : "YoY: —"}
                 />
-
                 <Stat
                   label="Current 30-Day Average Units"
                   value={kpis.avg30 != null ? `${fmtNum(kpis.avg30)} units` : "—"}
                   sub={kpis.avg30YoY != null ? `${fmtPct(kpis.avg30YoY, 2)} YoY` : "YoY: —"}
                 />
-
                 <Stat
                   label="YTD Total Units (from 1 Apr)"
                   value={kpis.ytdTotal != null ? `${fmtNum(kpis.ytdTotal)} units` : "—"}
                   sub={kpis.ytdYoY != null ? `${fmtPct(kpis.ytdYoY, 2)} YoY` : "YoY: —"}
                   accent="ytd"
                 />
-
                 <Stat
                   label="MTD Average Units"
                   value={kpis.mtdAvg != null ? `${fmtNum(kpis.mtdAvg)} units` : "—"}
@@ -1236,7 +1338,7 @@ export default function App() {
 
                 <div className="h-[340px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={dailyForChartRounded} margin={{ top: 10, right: 18, bottom: 10, left: 8 }}>
+                    <LineChart data={dailyForChartWithControl} margin={{ top: 10, right: 18, bottom: 10, left: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="label" tick={{ fontSize: 12 }} minTickGap={24} />
 
@@ -1266,8 +1368,23 @@ export default function App() {
                             return [`${fmtNum(num ?? null, 2)} units`, aggFreq === "daily" ? "Generation" : "Total (current)"];
                           }
                           if (key === "prev_year_units") return [`${fmtNum(num ?? null, 2)} units`, "Total (previous year)"];
+
                           if (key === "yoy_pct") return [fmtPct(num ?? null, 2), "YoY %"];
                           if (key === "mom_pct") return [fmtPct(num ?? null, 2), aggFreq === "weekly" ? "WoW %" : "MoM %"];
+
+                          // Control lines (units)
+                          if (key === "__mean_units") return [`${fmtNum(num ?? null, 2)} units`, "Mean (units)"];
+                          if (key === "__p1_units") return [`${fmtNum(num ?? null, 2)} units`, "+1σ (units)"];
+                          if (key === "__p2_units") return [`${fmtNum(num ?? null, 2)} units`, "+2σ (units)"];
+                          if (key === "__m1_units") return [`${fmtNum(num ?? null, 2)} units`, "-1σ (units)"];
+                          if (key === "__m2_units") return [`${fmtNum(num ?? null, 2)} units`, "-2σ (units)"];
+
+                          // Control lines (YoY%)
+                          if (key === "__mean_yoy") return [fmtPct(num ?? null, 2), "Mean (YoY%)"];
+                          if (key === "__p1_yoy") return [fmtPct(num ?? null, 2), "+1σ (YoY%)"];
+                          if (key === "__p2_yoy") return [fmtPct(num ?? null, 2), "+2σ (YoY%)"];
+                          if (key === "__m1_yoy") return [fmtPct(num ?? null, 2), "-1σ (YoY%)"];
+                          if (key === "__m2_yoy") return [fmtPct(num ?? null, 2), "-2σ (YoY%)"];
 
                           if (num != null) return [fmtNum(num, 2), String(name)];
                           return [v, String(name)];
@@ -1276,86 +1393,49 @@ export default function App() {
                           `${aggFreq === "daily" ? "Date" : aggFreq === "weekly" ? "Week" : aggFreq === "monthly" ? "Month" : "Date"}: ${l}`
                         }
                       />
+
                       <Legend />
 
+                      {/* MAIN series */}
                       {showUnitsSeries ? (
-                        <Line
-                          yAxisId="left"
-                          type="monotone"
-                          dataKey="units"
-                          name={aggFreq === "rolling30" ? "30D Rolling Sum (current)" : "Total Current"}
-                          dot={false}
-                          strokeWidth={2}
-                          stroke="#dc2626"
-                        />
+                        <Line yAxisId="left" type="monotone" dataKey="units" name="Total Current" dot={false} strokeWidth={2} stroke="#dc2626" />
                       ) : null}
 
                       {showPrevYearSeries ? (
-                        <Line
-                          yAxisId="left"
-                          type="monotone"
-                          dataKey="prev_year_units"
-                          name={aggFreq === "rolling30" ? "30D Rolling Sum (prev year)" : "Total (previous year)"}
-                          dot={false}
-                          strokeWidth={2}
-                          stroke="#64748b"
-                        />
+                        <Line yAxisId="left" type="monotone" dataKey="prev_year_units" name="Total (previous year)" dot={false} strokeWidth={2} stroke="#64748b" />
                       ) : null}
 
                       {showYoYSeries ? (
-                        <Line
-                          yAxisId="right"
-                          type="monotone"
-                          dataKey="yoy_pct"
-                          name="YoY %"
-                          dot={false}
-                          strokeWidth={2}
-                          stroke="#16a34a"
-                        />
+                        <Line yAxisId="right" type="monotone" dataKey="yoy_pct" name="YoY %" dot={false} strokeWidth={2} stroke="#16a34a" />
                       ) : null}
 
                       {showMoMSeries ? (
-                        <Line
-                          yAxisId="right"
-                          type="monotone"
-                          dataKey="mom_pct"
-                          name={aggFreq === "weekly" ? "WoW %" : "MoM %"}
-                          dot={false}
-                          strokeWidth={2}
-                          stroke="#dc2626"
-                        />
+                        <Line yAxisId="right" type="monotone" dataKey="mom_pct" name={aggFreq === "weekly" ? "WoW %" : "MoM %"} dot={false} strokeWidth={2} stroke="#dc2626" />
                       ) : null}
 
-                      {/* ✅ FIX: Control lines rendered as ReferenceLine (always works reliably) */}
-                      {showControlLines && controlLeft && anyTotalsShown ? (
+                      {/* CONTROL LINES (UNITS) — FIXED: tied to showControlLines + controlStatsLeft */}
+                      {showControlLines && controlStatsLeft ? (
                         <>
-                          <ReferenceLine yAxisId="left" y={controlLeft.mean} stroke="#7c3aed" strokeWidth={2} strokeOpacity={0.75} />
-                          <ReferenceLine yAxisId="left" y={controlLeft.p1} stroke="#7c3aed" strokeDasharray="6 4" strokeOpacity={0.65} />
-                          <ReferenceLine yAxisId="left" y={controlLeft.p2} stroke="#7c3aed" strokeDasharray="2 6" strokeOpacity={0.65} />
-                          <ReferenceLine yAxisId="left" y={controlLeft.m1} stroke="#7c3aed" strokeDasharray="6 4" strokeOpacity={0.65} />
-                          <ReferenceLine yAxisId="left" y={controlLeft.m2} stroke="#7c3aed" strokeDasharray="2 6" strokeOpacity={0.65} />
+                          <Line yAxisId="left" type="monotone" dataKey="__mean_units" name="Mean (units)" dot={false} strokeWidth={2} stroke="#f59e0b" strokeOpacity={0.9} connectNulls isAnimationActive={false} />
+                          <Line yAxisId="left" type="monotone" dataKey="__p1_units" name="+1σ (units)" dot={false} strokeWidth={1.6} stroke="#22c55e" strokeOpacity={0.75} strokeDasharray="6 4" connectNulls isAnimationActive={false} />
+                          <Line yAxisId="left" type="monotone" dataKey="__p2_units" name="+2σ (units)" dot={false} strokeWidth={1.6} stroke="#16a34a" strokeOpacity={0.75} strokeDasharray="2 6" connectNulls isAnimationActive={false} />
+                          <Line yAxisId="left" type="monotone" dataKey="__m1_units" name="-1σ (units)" dot={false} strokeWidth={1.6} stroke="#60a5fa" strokeOpacity={0.75} strokeDasharray="6 4" connectNulls isAnimationActive={false} />
+                          <Line yAxisId="left" type="monotone" dataKey="__m2_units" name="-2σ (units)" dot={false} strokeWidth={1.6} stroke="#2563eb" strokeOpacity={0.75} strokeDasharray="2 6" connectNulls isAnimationActive={false} />
                         </>
                       ) : null}
 
-                      {showControlLines && controlYoY && showYoYSeries ? (
+                      {/* CONTROL LINES (YoY%) */}
+                      {showControlLines && controlStatsYoY ? (
                         <>
-                          <ReferenceLine yAxisId="right" y={controlYoY.mean} stroke="#0f766e" strokeWidth={2} strokeOpacity={0.75} />
-                          <ReferenceLine yAxisId="right" y={controlYoY.p1} stroke="#0f766e" strokeDasharray="6 4" strokeOpacity={0.65} />
-                          <ReferenceLine yAxisId="right" y={controlYoY.p2} stroke="#0f766e" strokeDasharray="2 6" strokeOpacity={0.65} />
-                          <ReferenceLine yAxisId="right" y={controlYoY.m1} stroke="#0f766e" strokeDasharray="6 4" strokeOpacity={0.65} />
-                          <ReferenceLine yAxisId="right" y={controlYoY.m2} stroke="#0f766e" strokeDasharray="2 6" strokeOpacity={0.65} />
+                          <Line yAxisId="right" type="monotone" dataKey="__mean_yoy" name="Mean (YoY%)" dot={false} strokeWidth={2} stroke="#f59e0b" strokeOpacity={0.9} connectNulls isAnimationActive={false} />
+                          <Line yAxisId="right" type="monotone" dataKey="__p1_yoy" name="+1σ (YoY%)" dot={false} strokeWidth={1.6} stroke="#22c55e" strokeOpacity={0.75} strokeDasharray="6 4" connectNulls isAnimationActive={false} />
+                          <Line yAxisId="right" type="monotone" dataKey="__p2_yoy" name="+2σ (YoY%)" dot={false} strokeWidth={1.6} stroke="#16a34a" strokeOpacity={0.75} strokeDasharray="2 6" connectNulls isAnimationActive={false} />
+                          <Line yAxisId="right" type="monotone" dataKey="__m1_yoy" name="-1σ (YoY%)" dot={false} strokeWidth={1.6} stroke="#60a5fa" strokeOpacity={0.75} strokeDasharray="6 4" connectNulls isAnimationActive={false} />
+                          <Line yAxisId="right" type="monotone" dataKey="__m2_yoy" name="-2σ (YoY%)" dot={false} strokeWidth={1.6} stroke="#2563eb" strokeOpacity={0.75} strokeDasharray="2 6" connectNulls isAnimationActive={false} />
                         </>
                       ) : null}
                     </LineChart>
                   </ResponsiveContainer>
-
-                  {/* Tiny legend explainer (so user knows what the purple/teal lines mean) */}
-                  {showControlLines ? (
-                    <div className="mt-2 text-[12px] text-slate-600">
-                      Control lines: <span className="font-semibold">Mean</span>, <span className="font-semibold">±1σ</span>,{" "}
-                      <span className="font-semibold">±2σ</span> (computed on visible data).
-                    </div>
-                  ) : null}
                 </div>
               </>
             )}
@@ -1407,14 +1487,66 @@ export default function App() {
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
+
+                <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                  <div className="text-xs font-semibold text-slate-700">How growth is calculated</div>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-600">
+                    <li>
+                      <span className="font-medium">MoM%</span> compares the same day-range (e.g., 1st–15th vs 1st–15th of
+                      prior month if current month is incomplete).
+                    </li>
+                    <li>
+                      <span className="font-medium">YoY%</span> compares the same day-range (e.g., 1st–15th vs 1st–15th last
+                      year if current month is incomplete).
+                    </li>
+                    <li>
+                      Latest <span className="font-medium">MoM (MTD avg)</span> compares month-to-date average vs prior month
+                      month-to-date average (same day-of-month window).
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        <div className="mt-6">
+          <Card title="Monthly table (last 24 months)">
+            {!hasData ? (
+              <div className="text-sm text-slate-600">Add data to see the monthly table.</div>
+            ) : (
+              <div className="overflow-auto rounded-xl ring-1 ring-slate-200">
+                <table className="w-full border-collapse bg-white text-left text-sm">
+                  <thead className="sticky top-0 bg-slate-50">
+                    <tr>
+                      <th className="px-3 py-2 text-xs font-semibold text-slate-600">Month</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-slate-600">Total (units)</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-slate-600">MoM%</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-slate-600">YoY%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthlyForChart
+                      .slice()
+                      .reverse()
+                      .map((m) => (
+                        <tr key={m.month} className="border-t border-slate-100">
+                          <td className="px-3 py-2 font-medium text-slate-900">{m.month}</td>
+                          <td className="px-3 py-2 text-slate-700">{fmtNum(m.total_units, 2)}</td>
+                          <td className="px-3 py-2 text-slate-700">{fmtPct(m.mom_pct, 2)}</td>
+                          <td className="px-3 py-2 text-slate-700">{fmtPct(m.yoy_pct, 2)}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </Card>
         </div>
 
         <div className="mt-6 text-xs text-slate-500">
-          Tip: This version stores data in browser localStorage. If you want GitHub CSV as default input, tell me and I will
-          switch loading to fetch the CSV from /public/data/ in Vercel/GitHub.
+          Tip: Auto-fetch needs a small backend proxy because CEA/NPP downloads often block browser-to-site requests (CORS).
+          This UI expects an endpoint at /api/cea/daily that returns Total generation incl. RE.
         </div>
       </div>
     </div>
