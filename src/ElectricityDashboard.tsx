@@ -28,11 +28,26 @@ function parseISOKey(s: string) {
   return Number.isNaN(d.getTime()) ? null : s;
 }
 
-// Parse DD-MM-YYYY -> ISO; also accept ISO.
+// Parse DD/MM/YYYY -> ISO; also accept DD-MM-YYYY and ISO.
 function parseInputDate(s: unknown) {
   if (typeof s !== "string") return null;
   const t = s.trim();
 
+  // ✅ preferred: dd/mm/yyyy
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(t)) {
+    const [dd, mm, yyyy] = t.split("/").map(Number);
+    const d = new Date(Date.UTC(yyyy, mm - 1, dd));
+    if (Number.isNaN(d.getTime())) return null;
+    if (
+      d.getUTCFullYear() !== yyyy ||
+      d.getUTCMonth() !== mm - 1 ||
+      d.getUTCDate() !== dd
+    )
+      return null;
+    return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  }
+
+  // Back-compat: dd-mm-yyyy
   if (/^\d{2}-\d{2}-\d{4}$/.test(t)) {
     const [dd, mm, yyyy] = t.split("-").map(Number);
     const d = new Date(Date.UTC(yyyy, mm - 1, dd));
@@ -51,9 +66,17 @@ function parseInputDate(s: unknown) {
 }
 
 function formatDDMMYYYY(iso: string) {
+  // UI display format stays dd-mm-yyyy (no UI change)
   if (!iso || typeof iso !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "—";
   const [y, m, d] = iso.split("-");
   return `${d}-${m}-${y}`;
+}
+
+// ✅ CSV standard output: dd/mm/yyyy
+function formatDDMMYYYYForCSV(iso: string) {
+  if (!iso || typeof iso !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "—";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
 }
 
 function formatDDMMYY(iso: string) {
@@ -174,7 +197,7 @@ function csvParse(text: string) {
     const v = Number(String(vRaw).replace(/,/g, ""));
 
     if (!date) {
-      errors.push(`Row ${i + 1}: invalid date '${dRaw}' (expected DD-MM-YYYY)`);
+      errors.push(`Row ${i + 1}: invalid date '${dRaw}' (expected DD/MM/YYYY)`);
       continue;
     }
     if (!Number.isFinite(v)) {
@@ -188,11 +211,12 @@ function csvParse(text: string) {
 }
 
 function sampleCSV(valueColumnKey: string) {
+  // ✅ sample uses dd/mm/yyyy
   return [
     `date,${valueColumnKey}`,
-    "18-12-2025,10",
-    "19-12-2025,11",
-    "20-12-2025,12",
+    "18/12/2025,10",
+    "19/12/2025,11",
+    "20/12/2025,12",
   ].join("\n");
 }
 
@@ -540,7 +564,7 @@ export default function ElectricityDashboard(props: ElectricityDashboardProps) {
 
   const STORAGE_KEY = `tusk_india_${type}_v1`;
   const isSumTab = calcMode === "sum"; // Generation/Demand/Supply
-  const isAvgTab = calcMode === "avg"; // Coal PLF / RTM
+  const isAvgTab = calcMode === "avg"; // Coal PLF / RTM / Peak Demand Met
 
   const fmtValue = (x: number | null | undefined) => {
     if (x == null || Number.isNaN(x)) return "—";
@@ -581,6 +605,7 @@ export default function ElectricityDashboard(props: ElectricityDashboardProps) {
     const dd = String(t.getDate()).padStart(2, "0");
     const mm = String(t.getMonth() + 1).padStart(2, "0");
     const yyyy = t.getFullYear();
+    // keep existing default input format for UI (dd-mm-yyyy)
     return `${dd}-${mm}-${yyyy}`;
   });
 
@@ -997,6 +1022,15 @@ export default function ElectricityDashboard(props: ElectricityDashboardProps) {
     }));
   }, [monthlyAgg]);
 
+  // ✅ Peak Demand Met footer requirement: average of 24 monthly values (only for this tab)
+  const monthlyFooterAvgForPeakDemand = useMemo(() => {
+    if (type !== "demand") return null;
+    if (calcMode !== "avg") return null;
+    const vals = monthlyForChart.map((d) => asFiniteNumber(d.value)).filter((v): v is number => v != null);
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }, [type, calcMode, monthlyForChart]);
+
   const monthlyChartMean = useMemo(() => {
     if (!monthlyForChart.length) return null;
     const vals = monthlyForChart
@@ -1162,7 +1196,7 @@ export default function ElectricityDashboard(props: ElectricityDashboardProps) {
 
     const iso = parseInputDate(date);
     if (!iso) {
-      setErrors(["Please enter a valid date (DD-MM-YYYY)."]);
+      setErrors(["Please enter a valid date (DD-MM-YYYY or DD/MM/YYYY)."]);
       return;
     }
 
@@ -1220,7 +1254,8 @@ export default function ElectricityDashboard(props: ElectricityDashboardProps) {
 
   function exportCSV() {
     const header = `date,${valueColumnKey}`;
-    const lines = sortedDaily.map((d) => `${formatDDMMYYYY(d.date)},${d.value}`);
+    // ✅ export uses dd/mm/yyyy
+    const lines = sortedDaily.map((d) => `${formatDDMMYYYYForCSV(d.date)},${d.value}`);
     downloadCSV(`india_${type}_${new Date().toISOString().slice(0, 10)}.csv`, [header, ...lines].join("\n"));
   }
 
@@ -1333,6 +1368,7 @@ export default function ElectricityDashboard(props: ElectricityDashboardProps) {
                             onChange={(e) => setFromIso(e.target.value)}
                             className="mt-1 w-full min-w-[180px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-slate-300 tabular-nums"
                           />
+
                           <div className="mt-1 text-[12px] font-medium text-slate-600 tabular-nums">
                             {fromIso ? formatDDMMYY(fromIso) : ""}
                           </div>
@@ -1574,7 +1610,7 @@ export default function ElectricityDashboard(props: ElectricityDashboardProps) {
                           <Line yAxisId="right" type="monotone" dataKey="__mean_yoy" name="Mean (YoY%)" dot={false} strokeWidth={2} stroke="#000000" connectNulls />
                           <Line yAxisId="right" type="monotone" dataKey="__p1_yoy" name="+1σ (YoY%)" dot={false} strokeWidth={2} stroke="#2563eb" strokeDasharray="6 4" connectNulls />
                           <Line yAxisId="right" type="monotone" dataKey="__p2_yoy" name="+2σ (YoY%)" dot={false} strokeWidth={2} stroke="#4f46e5" strokeDasharray="6 4" connectNulls />
-                          <Line yAxisId="right" type="monotone" dataKey="__m1_yoy" name="-1σ (YoY%)" dot={false} strokeWidth={2} stroke="#f97316" strokeDasharray="6 4" connectNulls />
+                          <Line yAxisId="right" type="monotone" dataKey="__m1_yoy" name="-1σ (YoY%)" dot={false} strokeWidth={2} strokeWidth={2} stroke="#f97316" strokeDasharray="6 4" connectNulls />
                           <Line yAxisId="right" type="monotone" dataKey="__m2_yoy" name="-2σ (YoY%)" dot={false} strokeWidth={2} stroke="#eab308" strokeDasharray="6 4" connectNulls />
                         </>
                       ) : null}
@@ -1629,7 +1665,7 @@ export default function ElectricityDashboard(props: ElectricityDashboardProps) {
                   />
                 </div>
                 <div className="mt-2 text-xs text-slate-500">
-                  Supported: <span className="font-mono">date,VALUE</span> (DD-MM-YYYY, number)
+                  Supported: <span className="font-mono">date,VALUE</span> (DD/MM/YYYY, number)
                 </div>
               </div>
 
@@ -1877,11 +1913,29 @@ export default function ElectricityDashboard(props: ElectricityDashboardProps) {
                           <tr key={m.month} className="border-t border-slate-100">
                             <td className="px-3 py-2 font-medium text-slate-900">{m.month}</td>
                             <td className="px-3 py-2 text-slate-700">{fmtValue(m.value)}</td>
-                            <td className="px-3 py-2 text-slate-700">{fmtPct(m.mom_pct)}</td>
-                            <td className="px-3 py-2 text-slate-700">{fmtPct(m.yoy_pct)}</td>
+
+                            {/* ✅ Conditional formatting for MoM% */}
+                            <td className={`px-3 py-2 ${pctColorClass(m.mom_pct)}`}>{fmtPct(m.mom_pct)}</td>
+
+                            {/* ✅ Conditional formatting for YoY% */}
+                            <td className={`px-3 py-2 ${pctColorClass(m.yoy_pct)}`}>{fmtPct(m.yoy_pct)}</td>
                           </tr>
                         ))}
                     </tbody>
+
+                    {/* ✅ Peak Demand Met requirement: footer avg of 24 monthly values */}
+                    {monthlyFooterAvgForPeakDemand != null ? (
+                      <tfoot>
+                        <tr className="border-t border-slate-200 bg-slate-50">
+                          <td className="px-3 py-2 font-semibold text-slate-700">Avg (24M)</td>
+                          <td className="px-3 py-2 font-semibold text-slate-900">
+                            {fmtValue(monthlyFooterAvgForPeakDemand)}
+                          </td>
+                          <td className="px-3 py-2" />
+                          <td className="px-3 py-2" />
+                        </tr>
+                      </tfoot>
+                    ) : null}
                   </table>
                 ) : tablePeriod === "weekly" ? (
                   <table className="w-full border-collapse bg-white text-left text-sm">
